@@ -1,0 +1,120 @@
+openapi: 3.0.3
+info:
+  title: CoriseDND API
+  version: 1.0.0
+  description: API конструктора персонажей CoriseDND. Все маршруты версионированы (/api/v1).
+servers:
+  - url: http://localhost:8080
+paths:
+  /api/v1/auth/register:
+    post:
+      summary: Регистрация
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '409':
+          description: Email или имя пользователя уже заняты
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: Ошибка валидации
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /api/v1/auth/login:
+    post:
+      summary: Вход
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Успешный вход
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401':
+          description: Неверный email или пароль
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: Ошибка валидации
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /api/v1/me:
+    get:
+      summary: Текущий пользователь
+      tags: [Auth]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Данные пользователя
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '401':
+          description: Токен отсутствует, недействителен или истёк
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, username, password, confirmPassword]
+      properties:
+        email: { type: string, format: email }
+        username: { type: string, minLength: 3, maxLength: 50 }
+        password: { type: string, minLength: 8, maxLength: 72 }
+        confirmPassword: { type: string }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    UserResponse:
+      type: object
+      required: [id, email, username]
+      properties:
+        id: { type: integer, format: int64 }
+        email: { type: string }
+        username: { type: string }
+    AuthResponse:
+      type: object
+      required: [token, tokenType, expiresInSeconds, user]
+      properties:
+        token: { type: string }
+        tokenType: { type: string, example: Bearer }
+        expiresInSeconds: { type: integer, format: int64 }
+        user: { $ref: '#/components/schemas/UserResponse' }
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: validation_error }
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: { type: string }
