@@ -3,12 +3,19 @@ package com.corise.dnd
 import com.corise.dnd.config.AppConfig
 import com.corise.dnd.database.DatabaseFactory
 import com.corise.dnd.dto.ErrorResponse
+import com.corise.dnd.repository.CatalogRepository
+import com.corise.dnd.repository.CharacterRepository
 import com.corise.dnd.repository.UserRepository
 import com.corise.dnd.routes.AUTH_JWT
 import com.corise.dnd.routes.authRoutes
+import com.corise.dnd.routes.catalogRoutes
+import com.corise.dnd.routes.characterRoutes
 import com.corise.dnd.security.JwtService
 import com.corise.dnd.service.ApiException
 import com.corise.dnd.service.AuthService
+import com.corise.dnd.service.CatalogService
+import com.corise.dnd.service.CharacterService
+import com.corise.dnd.service.CustomContentService
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -29,6 +36,7 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import org.jetbrains.exposed.exceptions.ExposedSQLException
 
 fun Application.module() {
     val config = AppConfig.from(environment.config)
@@ -36,6 +44,10 @@ fun Application.module() {
 
     val jwtService = JwtService(config.jwt)
     val authService = AuthService(UserRepository(), jwtService)
+    val catalogRepository = CatalogRepository()
+    val catalogService = CatalogService(catalogRepository)
+    val customContentService = CustomContentService(catalogRepository)
+    val characterService = CharacterService(CharacterRepository(), catalogRepository)
 
     install(CallLogging)
     install(ContentNegotiation) {
@@ -50,6 +62,26 @@ fun Application.module() {
         exception<BadRequestException> { call, _ -> call.respondInvalidBody() }
         exception<ContentTransformationException> { call, _ -> call.respondInvalidBody() }
         exception<SerializationException> { call, _ -> call.respondInvalidBody() }
+        // Ограничения БД как последний рубеж: наружу - только безопасное сообщение
+        exception<ExposedSQLException> { call, e ->
+            when (e.sqlState) {
+                "23505", "23503", "23001" -> call.respond(
+                    HttpStatusCode.Conflict,
+                    ErrorResponse("conflict", "Операция конфликтует с существующими данными"),
+                )
+                "23514", "23502" -> call.respond(
+                    HttpStatusCode.UnprocessableEntity,
+                    ErrorResponse("validation_error", "Данные нарушают ограничения базы"),
+                )
+                else -> {
+                    call.application.log.error("Ошибка БД", e)
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        ErrorResponse("internal_error", "Внутренняя ошибка сервера"),
+                    )
+                }
+            }
+        }
         // Всё остальное: в лог - полностью, клиенту - без деталей (никаких traceback и SQL)
         exception<Throwable> { call, e ->
             call.application.log.error("Необработанная ошибка", e)
@@ -79,6 +111,8 @@ fun Application.module() {
         swaggerUI(path = "swagger", swaggerFile = "openapi/documentation.yaml")
         route("/api/v1") {
             authRoutes(authService)
+            catalogRoutes(catalogService, customContentService)
+            characterRoutes(characterService)
         }
     }
 }

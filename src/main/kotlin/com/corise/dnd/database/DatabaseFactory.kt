@@ -9,8 +9,13 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 
 object DatabaseFactory {
+    private var dataSource: HikariDataSource? = null
+
     fun init(config: DbConfig) {
-        val dataSource = HikariDataSource(HikariConfig().apply {
+        // при повторном запуске (например, в тестах) закрываем прежний пул
+        dataSource?.close()
+
+        val ds = HikariDataSource(HikariConfig().apply {
             jdbcUrl = config.url
             username = config.user
             password = config.password
@@ -19,11 +24,12 @@ object DatabaseFactory {
         })
         // Схема создаётся только миграциями Flyway (V1, V2, ...), вручную таблицы не создаём.
         Flyway.configure()
-            .dataSource(dataSource)
+            .dataSource(ds)
             .locations("classpath:db/migration")
             .load()
             .migrate()
-        Database.connect(dataSource)
+        Database.connect(ds)
+        dataSource = ds
     }
 }
 

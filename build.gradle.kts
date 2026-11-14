@@ -49,11 +49,10 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
     // Тесты (PostgreSQL поднимается в контейнере, как в проде)
+    // Тесты: реальный PostgreSQL, отдельная база corise_test (Docker не нужен)
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
     testImplementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
-    testImplementation("org.testcontainers:postgresql:1.20.4")
-    testImplementation("org.testcontainers:junit-jupiter:1.20.4")
 }
 
 tasks.test {
