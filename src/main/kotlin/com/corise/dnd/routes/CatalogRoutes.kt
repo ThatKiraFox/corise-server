@@ -70,6 +70,7 @@ fun Route.catalogRoutes(catalog: CatalogService, custom: CustomContentService) {
         get("/weapons") { call.respond(HttpStatusCode.OK, catalog.weapons(call.currentUserId())) }
         get("/armours") { call.respond(HttpStatusCode.OK, catalog.armours(call.currentUserId())) }
         get("/skills") { call.respond(HttpStatusCode.OK, catalog.skills()) }
+        get("/attributes") { call.respond(HttpStatusCode.OK, catalog.attributes()) }
         get("/spells") {
             val page = catalog.spells(
                 userId = call.currentUserId(),
@@ -79,6 +80,20 @@ fun Route.catalogRoutes(catalog: CatalogService, custom: CustomContentService) {
                 offset = call.queryLong("offset"),
             )
             call.respond(HttpStatusCode.OK, page)
+        }
+
+        get("/lore") {
+            val page = catalog.loreList(
+                userId = call.currentUserId(),
+                search = call.request.queryParameters["search"],
+                category = call.request.queryParameters["category"],
+                limit = call.queryInt("limit"),
+                offset = call.queryLong("offset"),
+            )
+            call.respond(HttpStatusCode.OK, page)
+        }
+        get("/lore/{id}") {
+            call.respond(HttpStatusCode.OK, catalog.loreEntry(call.currentUserId(), call.pathId("id")))
         }
 
         // ---------- Пользовательский контент ----------

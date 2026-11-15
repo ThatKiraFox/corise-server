@@ -93,3 +93,16 @@ data class ArmourResponse(
     val vulnerability: String,
     val isCustom: Boolean,
 )
+
+/** Элемент списка лора: без текста статьи. */
+@Serializable
+data class LoreListItem(val id: Long, val category: String, val title: String, val isCustom: Boolean)
+
+@Serializable
+data class LoreResponse(
+    val id: Long,
+    val category: String,
+    val title: String,
+    val body: String,
+    val isCustom: Boolean,
+)

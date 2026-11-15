@@ -21,6 +21,8 @@ import com.corise.dnd.model.Spells
 import com.corise.dnd.model.WeaponEntity
 import com.corise.dnd.model.Weapons
 import com.corise.dnd.model.Classes
+import com.corise.dnd.model.LoreEntities
+import com.corise.dnd.model.LoreEntity
 import com.corise.dnd.model.visibleTo
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.with
@@ -31,6 +33,8 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.lowerCase
 import org.jetbrains.exposed.sql.selectAll
+import com.corise.dnd.dto.NamedRef
+import com.corise.dnd.model.AttributeTable
 
 class CatalogRepository {
     val races = OwnedRepository(Races, RaceEntity)
@@ -40,6 +44,7 @@ class CatalogRepository {
     val classes = OwnedRepository(Classes, ClassEntity)
     val spells = OwnedRepository(Spells, SpellEntity)
     val items = OwnedRepository(Items, ItemEntity)
+    val lore = OwnedRepository(LoreEntities, LoreEntity)
 
     // ---------- Заклинания: поиск, фильтр, страницы ----------
 
@@ -63,10 +68,36 @@ class CatalogRepository {
         return items to total
     }
 
+    // ---------- Лор: поиск, категория, страницы ----------
+
+    private fun loreFiltered(userId: Long, search: String?, category: String?): org.jetbrains.exposed.sql.SizedIterable<LoreEntity> {
+        var cond: Op<Boolean> = visibleTo(LoreEntities, userId)
+        if (search != null) cond = cond and (LoreEntities.title.lowerCase() like likePattern(search))
+        if (category != null) cond = cond and (LoreEntities.category eq category)
+        return LoreEntity.find(cond)
+    }
+
+    fun lorePage(userId: Long, search: String?, category: String?, limit: Int, offset: Long): Pair<List<LoreEntity>, Long> {
+        val total = loreFiltered(userId, search, category).count()
+        val items = loreFiltered(userId, search, category)
+            .orderBy(
+                LoreEntities.category to SortOrder.ASC,
+                LoreEntities.title to SortOrder.ASC,
+                LoreEntities.id to SortOrder.ASC,
+            )
+            .limit(limit)
+            .offset(offset)
+            .toList()
+        return items to total
+    }
+
     // ---------- Навыки ----------
 
     fun skills(): List<SkillEntity> = SkillEntity.all().toList()
     fun skill(id: Long): SkillEntity? = SkillEntity.findById(id)
+    fun attributes(): List<NamedRef> =
+        AttributeTable.selectAll().orderBy(AttributeTable.id to SortOrder.ASC)
+            .map { NamedRef(it[AttributeTable.id].value, it[AttributeTable.name]) }
 
     // ---------- Оружие и броня (владелец - у связанного предмета) ----------
 

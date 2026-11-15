@@ -17,6 +17,7 @@ import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import com.corise.dnd.dto.EquipmentRequest
 import com.corise.dnd.dto.InventoryItemRequest
+import com.corise.dnd.dto.PersonalityDto
 import com.corise.dnd.dto.SetValueRequest
 
 fun Route.characterRoutes(service: CharacterService) {
@@ -67,6 +68,11 @@ fun Route.characterRoutes(service: CharacterService) {
                 put("/equipment") {
                     val body = call.receive<EquipmentRequest>()
                     val result = service.setEquipment(call.currentUserId(), call.pathId("id"), body)
+                    call.respond(HttpStatusCode.OK, result)
+                }
+                put("/personality") {
+                    val body = call.receive<PersonalityDto>()
+                    val result = service.setPersonality(call.currentUserId(), call.pathId("id"), body)
                     call.respond(HttpStatusCode.OK, result)
                 }
                 route("/attributes/{attributeId}") {

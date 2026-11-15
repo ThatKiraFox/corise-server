@@ -29,6 +29,16 @@ import com.corise.dnd.model.SkillTable
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
+import com.corise.dnd.dto.NamedRef
+import com.corise.dnd.dto.PersonalityDto
+import com.corise.dnd.dto.StatInput
+import com.corise.dnd.model.CharacterClassTable
+import com.corise.dnd.model.CharacterLanguageTable
+import com.corise.dnd.model.ClassEntity
+import com.corise.dnd.model.CultureLanguageTable
+import com.corise.dnd.model.LanguageTable
+import com.corise.dnd.model.PersonalityTable
+import org.jetbrains.exposed.sql.batchInsert
 
 class CharacterStats(
     val attributes: List<CharacterAttributeResponse>,
@@ -207,5 +217,102 @@ class CharacterRepository {
                 it[CharacterSkillTable.level] = level
             }
         }
+    }
+
+    // ---------- Создание по правилам: очки, характер, языки, класс ----------
+
+    fun attributeIds(): Set<Long> = AttributeTable.selectAll().map { it[AttributeTable.id].value }.toSet()
+
+    fun skillIds(): Set<Long> = SkillTable.selectAll().map { it[SkillTable.id].value }.toSet()
+
+    /** Стартовые значения нового персонажа одним запросом на таблицу; нулевые не записываются. */
+    fun insertStats(characterId: Long, attributes: List<StatInput>, skills: List<StatInput>) {
+        CharacterAttributeTable.batchInsert(
+            attributes.filter { it.value > 0 }, shouldReturnGeneratedValues = false,
+        ) { a ->
+            this[CharacterAttributeTable.character] = characterId
+            this[CharacterAttributeTable.attribute] = a.id
+            this[CharacterAttributeTable.value] = a.value
+        }
+        CharacterSkillTable.batchInsert(
+            skills.filter { it.value > 0 }, shouldReturnGeneratedValues = false,
+        ) { s ->
+            this[CharacterSkillTable.character] = characterId
+            this[CharacterSkillTable.skill] = s.id
+            this[CharacterSkillTable.level] = s.value
+        }
+    }
+
+    fun personalityOf(characterId: Long): PersonalityDto? =
+        PersonalityTable.selectAll().where { PersonalityTable.character eq characterId }.firstOrNull()?.let {
+            PersonalityDto(
+                biography = it[PersonalityTable.biography],
+                goal = it[PersonalityTable.goal],
+                uniqueTraits = it[PersonalityTable.uniqueTraits],
+                personalityTraits = it[PersonalityTable.personalityTraits],
+                personalValues = it[PersonalityTable.personalValues],
+                personalEvils = it[PersonalityTable.personalEvils],
+            )
+        }
+
+    /** Записывает блок характера: обновляет запись или создаёт её. */
+    fun setPersonality(characterId: Long, p: PersonalityDto) {
+        val updated = PersonalityTable.update({ PersonalityTable.character eq characterId }) {
+            it[PersonalityTable.biography] = p.biography
+            it[PersonalityTable.goal] = p.goal
+            it[PersonalityTable.uniqueTraits] = p.uniqueTraits
+            it[PersonalityTable.personalityTraits] = p.personalityTraits
+            it[PersonalityTable.personalValues] = p.personalValues
+            it[PersonalityTable.personalEvils] = p.personalEvils
+        }
+        if (updated == 0) {
+            PersonalityTable.insert {
+                it[PersonalityTable.character] = characterId
+                it[PersonalityTable.biography] = p.biography
+                it[PersonalityTable.goal] = p.goal
+                it[PersonalityTable.uniqueTraits] = p.uniqueTraits
+                it[PersonalityTable.personalityTraits] = p.personalityTraits
+                it[PersonalityTable.personalValues] = p.personalValues
+                it[PersonalityTable.personalEvils] = p.personalEvils
+            }
+        }
+    }
+
+    /** Персонаж по умолчанию знает языки своей культуры. */
+    fun addCultureLanguages(characterId: Long, cultureId: Long) {
+        val languageIds = CultureLanguageTable.selectAll()
+            .where { CultureLanguageTable.culture eq cultureId }
+            .map { it[CultureLanguageTable.language] }
+        CharacterLanguageTable.batchInsert(languageIds, shouldReturnGeneratedValues = false) { languageId ->
+            this[CharacterLanguageTable.character] = characterId
+            this[CharacterLanguageTable.language] = languageId
+        }
+    }
+
+    fun languagesOf(characterId: Long): List<NamedRef> {
+        val ids = CharacterLanguageTable.selectAll()
+            .where { CharacterLanguageTable.character eq characterId }
+            .map { it[CharacterLanguageTable.language] }
+        if (ids.isEmpty()) return emptyList()
+        return LanguageTable.selectAll()
+            .where { LanguageTable.id inList ids }
+            .map { NamedRef(it[LanguageTable.id], it[LanguageTable.name]) }
+            .sortedBy { it.name }
+    }
+
+    fun addClass(characterId: Long, classId: Long) {
+        CharacterClassTable.insert {
+            it[CharacterClassTable.character] = characterId
+            it[CharacterClassTable.classId] = classId
+            it[CharacterClassTable.classLevel] = 1
+        }
+    }
+
+    fun classesOf(characterId: Long): List<NamedRef> {
+        val ids = CharacterClassTable.selectAll()
+            .where { CharacterClassTable.character eq characterId }
+            .map { it[CharacterClassTable.classId] }
+        if (ids.isEmpty()) return emptyList()
+        return ClassEntity.forIds(ids).map { NamedRef(it.id.value, it.name) }.sortedBy { it.name }
     }
 }

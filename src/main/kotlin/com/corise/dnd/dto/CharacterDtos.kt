@@ -15,6 +15,10 @@ data class CharacterCreateRequest(
     val hpCur: Int = 0,
     val mlCur: Int = 0,
     val spellIds: List<Long> = emptyList(),
+    val classId: Long? = null,
+    val personality: PersonalityDto = PersonalityDto(),
+    val attributes: List<StatInput> = emptyList(),
+    val skills: List<StatInput> = emptyList(),
 )
 
 /** Изменение (PUT): все основные поля обязательны, заклинания меняются отдельными запросами. */
@@ -51,6 +55,11 @@ data class CharacterResponse(
     val inventory: List<InventoryItemResponse>,
     val attributes: List<CharacterAttributeResponse>,
     val skills: List<CharacterSkillResponse>,
+    val hpMax: Int? = null,
+    val mlMax: Int? = null,
+    val personality: PersonalityDto? = null,
+    val languages: List<NamedRef> = emptyList(),
+    val classes: List<NamedRef> = emptyList(),
 )
 
 @Serializable
@@ -88,3 +97,17 @@ data class CharacterSkillResponse(
     val attributeId: Long,
     val level: Int,
 )
+
+@Serializable
+data class PersonalityDto(
+    val biography: String = "",
+    val goal: String = "",
+    val uniqueTraits: String = "",
+    val personalityTraits: String = "",
+    val personalValues: String = "",
+    val personalEvils: String = "",
+)
+
+/** Значение атрибута или навыка при создании: id справочника и уровень. */
+@Serializable
+data class StatInput(val id: Long, val value: Int)

@@ -20,6 +20,8 @@ import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.SizedCollection
 import org.jetbrains.exposed.sql.SortOrder
+import com.corise.dnd.dto.PersonalityDto
+import com.corise.dnd.dto.StatInput
 
 const val MAX_STAT = 10
 
@@ -49,12 +51,27 @@ class CharacterService(
         val backstory: BackstoryEntity?,
     )
 
-    /** Ответ с инвентарём персонажа (инвентарь читается отдельным запросом). */
-    /** Ответ с инвентарём, атрибутами и навыками персонажа (читаются отдельными запросами). */
+    /** Ответ с инвентарём, атрибутами, навыками, максимумами HP и ML, блоком характера, языками и классами. */
     private fun CharacterEntity.full(): CharacterResponse {
         val stats = characters.statsFor(listOf(id.value)).getValue(id.value)
+        val endurance = stats.attributes.firstOrNull { it.name == Stats.ENDURANCE }?.value ?: 0
+        val magicResistance = stats.skills.firstOrNull { it.name == Stats.MAGIC_RESISTANCE }?.level ?: 0
         return toResponse(characters.inventoryOf(this))
-            .copy(attributes = stats.attributes, skills = stats.skills)
+            .copy(
+                attributes = stats.attributes,
+                skills = stats.skills,
+                hpMax = Stats.maxHp(level, endurance),
+                mlMax = Stats.maxMl(level, magicResistance, endurance),
+                personality = characters.personalityOf(id.value),
+                languages = characters.languagesOf(id.value),
+                classes = characters.classesOf(id.value),
+            )
+    }
+
+    private fun CharacterEntity.maxHp(): Int {
+        val endurance = characters.statsFor(listOf(id.value)).getValue(id.value).attributes
+            .firstOrNull { it.name == Stats.ENDURANCE }?.value ?: 0
+        return Stats.maxHp(level, endurance)
     }
 
     // ---------- Чтение ----------
@@ -92,6 +109,7 @@ class CharacterService(
 
     suspend fun create(userId: Long, req: CharacterCreateRequest): CharacterResponse {
         validateFields(req.name, req.level, req.exp, req.hpCur, req.mlCur)
+        validatePersonality(req.personality)
         return dbQuery {
             val refs = resolveRefs(userId, req.raceId, req.cultureId, req.religionId, req.backstoryId)
             val spellIds = req.spellIds.distinct()
@@ -101,12 +119,23 @@ class CharacterService(
                 val missing = spellIds.filter { it !in found }
                 throw ValidationException(mapOf("spellIds" to "Заклинания не найдены: ${missing.joinToString()}"))
             }
-            // Любое исключение ниже откатывает всю транзакцию: персонажа без заклинаний не останется.
+            val cls = req.classId?.let {
+                catalog.classes.findVisible(it, userId)
+                    ?: throw ValidationException(mapOf("classId" to "Класс не найден"))
+            }
+            validateStartStats(req.attributes, req.skills)
+
+            // Любое исключение ниже откатывает всю транзакцию: частично созданного персонажа не останется.
             val entity = characters.create(
                 userId, req.name.trim(), refs.race, refs.culture, refs.religion, refs.backstory,
-                req.level, req.exp, req.hpCur, req.mlCur,
+                req.level, req.exp, 0, 0,
             )
             entity.spells = SizedCollection(spells)
+            characters.insertStats(entity.id.value, req.attributes, req.skills)
+            characters.setPersonality(entity.id.value, req.personality.trimmed())
+            refs.culture?.let { characters.addCultureLanguages(entity.id.value, it.id.value) }
+            cls?.let { characters.addClass(entity.id.value, it.id.value) }
+            entity.hpCur = entity.maxHp()
             entity.full()
         }
     }
@@ -133,6 +162,16 @@ class CharacterService(
 
     suspend fun delete(userId: Long, id: Long) {
         dbQuery { owned(userId, id).delete() }
+    }
+
+    /** Блок характера и биография: можно менять в любой момент. */
+    suspend fun setPersonality(userId: Long, id: Long, req: PersonalityDto): CharacterResponse {
+        validatePersonality(req)
+        return dbQuery {
+            val entity = owned(userId, id)
+            characters.setPersonality(entity.id.value, req.trimmed())
+            entity.full()
+        }
     }
 
     // ---------- Заклинания персонажа ----------
@@ -293,8 +332,58 @@ class CharacterService(
         if (value !in 0..MAX_STAT) throw ValidationException(mapOf("value" to "От 0 до $MAX_STAT"))
     }
 
+    private fun PersonalityDto.trimmed() = PersonalityDto(
+        biography.trim(), goal.trim(), uniqueTraits.trim(),
+        personalityTraits.trim(), personalValues.trim(), personalEvils.trim(),
+    )
+
+    private fun validatePersonality(p: PersonalityDto) {
+        val e = FieldErrors()
+        e.text("biography", p.biography, TEXT_MAX, required = false)
+        e.text("goal", p.goal, TEXT_MAX, required = false)
+        e.text("uniqueTraits", p.uniqueTraits, TEXT_MAX, required = false)
+        e.text("personalityTraits", p.personalityTraits, TEXT_MAX, required = false)
+        e.text("personalValues", p.personalValues, TEXT_MAX, required = false)
+        e.text("personalEvils", p.personalEvils, TEXT_MAX, required = false)
+        e.throwIfAny()
+    }
+
+    /** Point buy при создании: атрибуты 27 очков, навыки 35, каждое значение 0..5. */
+    private fun validateStartStats(attributes: List<StatInput>, skills: List<StatInput>) {
+        val errors = FieldErrors()
+        val max = Stats.MAX_START_STAT
+
+        val attributeIds = characters.attributeIds()
+        when {
+            attributes.map { it.id }.toSet().size != attributes.size ->
+                errors.add("attributes", "Атрибуты не должны повторяться")
+            attributes.any { it.id !in attributeIds } ->
+                errors.add("attributes", "Неизвестный атрибут")
+            attributes.any { it.value !in 0..max } ->
+                errors.add("attributes", "Значение каждого атрибута от 0 до $max")
+            attributes.sumOf { Stats.attributeCost(it.value) } > Stats.START_ATTRIBUTE_POINTS ->
+                errors.add("attributes", "Потрачено больше ${Stats.START_ATTRIBUTE_POINTS} очков атрибутов")
+        }
+
+        val skillIds = characters.skillIds()
+        when {
+            skills.map { it.id }.toSet().size != skills.size ->
+                errors.add("skills", "Навыки не должны повторяться")
+            skills.any { it.id !in skillIds } ->
+                errors.add("skills", "Неизвестный навык")
+            skills.any { it.value !in 0..max } ->
+                errors.add("skills", "Уровень каждого навыка от 0 до $max")
+            skills.sumOf { it.value } > Stats.START_SKILL_POINTS ->
+                errors.add("skills", "Потрачено больше ${Stats.START_SKILL_POINTS} очков навыков")
+        }
+        errors.throwIfAny()
+    }
+
     private companion object {
         const val MAX_AMOUNT = 9999
         const val SHIELD_CATEGORY = "shield"
+        const val TEXT_MAX = 5000
     }
+
+
 }

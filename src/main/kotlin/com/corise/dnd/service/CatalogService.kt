@@ -3,6 +3,9 @@ package com.corise.dnd.service
 import com.corise.dnd.database.dbQuery
 import com.corise.dnd.dto.ArmourResponse
 import com.corise.dnd.dto.ClassResponse
+import com.corise.dnd.dto.LoreListItem
+import com.corise.dnd.dto.LoreResponse
+import com.corise.dnd.dto.NamedRef
 import com.corise.dnd.dto.NamedResponse
 import com.corise.dnd.dto.PageResponse
 import com.corise.dnd.dto.RaceResponse
@@ -73,6 +76,27 @@ class CatalogService(private val catalog: CatalogRepository) {
         }
     }
 
+    suspend fun loreEntry(userId: Long, id: Long): LoreResponse =
+        dbQuery { (catalog.lore.findVisible(id, userId) ?: notFound()).toResponse() }
+
+    suspend fun loreList(userId: Long, search: String?, category: String?, limit: Int?, offset: Long?): PageResponse<LoreListItem> {
+        val lim = limit ?: DEFAULT_LIMIT
+        val off = offset ?: 0L
+        val errors = FieldErrors()
+        if (lim !in 1..MAX_LIMIT) errors.add("limit", "От 1 до $MAX_LIMIT")
+        if (off < 0) errors.add("offset", "Не может быть отрицательным")
+        if ((search?.length ?: 0) > 100) errors.add("search", "Не длиннее 100 символов")
+        if ((category?.length ?: 0) > 50) errors.add("category", "Не длиннее 50 символов")
+        errors.throwIfAny()
+
+        val cleanSearch = search?.trim()?.takeIf { it.isNotEmpty() }
+        val cleanCategory = category?.trim()?.takeIf { it.isNotEmpty() }
+        return dbQuery {
+            val (items, total) = catalog.lorePage(userId, cleanSearch, cleanCategory, lim, off)
+            PageResponse(items.map { it.toListItem() }, total, lim, off, off + items.size < total)
+        }
+    }
+
     suspend fun skills(): List<SkillResponse> = dbQuery { catalog.skills().map { it.toResponse() } }
 
     suspend fun weapons(userId: Long): List<WeaponResponse> =
@@ -88,6 +112,8 @@ class CatalogService(private val catalog: CatalogRepository) {
         dbQuery { (catalog.findArmour(id, userId) ?: notFound()).toResponse() }
 
     private fun notFound(): Nothing = throw NotFoundException()
+
+    suspend fun attributes(): List<NamedRef> = dbQuery { catalog.attributes() }
 
     companion object {
         const val DEFAULT_LIMIT = 20

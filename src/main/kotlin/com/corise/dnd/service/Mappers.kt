@@ -5,6 +5,8 @@ import com.corise.dnd.dto.CharacterResponse
 import com.corise.dnd.dto.EquipmentResponse
 import com.corise.dnd.dto.InventoryItemResponse
 import com.corise.dnd.dto.ClassResponse
+import com.corise.dnd.dto.LoreListItem
+import com.corise.dnd.dto.LoreResponse
 import com.corise.dnd.dto.NamedRef
 import com.corise.dnd.dto.NamedResponse
 import com.corise.dnd.dto.RaceResponse
@@ -17,6 +19,7 @@ import com.corise.dnd.model.CharacterEntity
 import com.corise.dnd.model.CharacterItemEntity
 import com.corise.dnd.model.ClassEntity
 import com.corise.dnd.model.CultureEntity
+import com.corise.dnd.model.LoreEntity
 import com.corise.dnd.model.RaceEntity
 import com.corise.dnd.model.ReligionEntity
 import com.corise.dnd.model.SkillEntity
@@ -97,3 +100,6 @@ internal fun CharacterEntity.toResponse(inventory: List<CharacterItemEntity>) = 
     attributes = emptyList(),
     skills = emptyList(),
 )
+
+internal fun LoreEntity.toResponse() = LoreResponse(id.value, category, title, body, isCustom)
+internal fun LoreEntity.toListItem() = LoreListItem(id.value, category, title, isCustom)

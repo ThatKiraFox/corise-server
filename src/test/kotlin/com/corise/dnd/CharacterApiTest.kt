@@ -211,6 +211,117 @@ class CharacterApiTest {
         val resp = client.api(HttpMethod.Put, "/characters/$id/attributes/$attributeId", stranger.token, """{"value":5}""")
         assertEquals(HttpStatusCode.Forbidden, resp.status)
     }
+
+    @Test
+    fun `при создании текущее HP равно максимальному`() = withApp { client ->
+        val user = client.registerUser()
+        val raceId = client.anyRaceId(user.token)
+
+        // characterBody отправляет hpCur = 10, но сервер его игнорирует
+        val body = client.api(HttpMethod.Post, "/characters", user.token, characterBody("Эовин", raceId, level = 3)).obj()
+
+        // Выносливость 0: 10 + 0 + 3 * 2
+        assertEquals(16, body.long("hpMax"))
+        assertEquals(16, body.long("hpCur"))
+    }
+
+    @Test
+    fun `при создании магическая нагрузка равна нулю, максимум рассчитан`() = withApp { client ->
+        val user = client.registerUser()
+        val raceId = client.anyRaceId(user.token)
+
+        // characterBody отправляет mlCur = 5, но сервер его игнорирует
+        val body = client.api(HttpMethod.Post, "/characters", user.token, characterBody("Арвен", raceId, level = 3)).obj()
+
+        // Навык и Выносливость 0: (3 + 0 + 0) * 10
+        assertEquals(30, body.long("mlMax"))
+        assertEquals(0, body.long("mlCur"))
+    }
+    private fun stats(ids: List<Long>, values: List<Int>) =
+        ids.zip(values).joinToString(",", "[", "]") { """{"id":${it.first},"value":${it.second}}""" }
+
+    private fun createBody(raceId: Long, cultureId: Long?, attributes: String, skills: String) =
+        """{"name":"По правилам","raceId":$raceId,"cultureId":${cultureId ?: "null"},"level":1,"exp":0,""" +
+                """"attributes":$attributes,"skills":$skills,""" +
+                """"personality":{"goal":"Найти брата","personalValues":"Семья"}}"""
+
+    @Test
+    fun `создание по правилам сохраняет очки, характер и язык культуры, ровно 27 и 35 очков разрешены`() = withApp { client ->
+        val user = client.registerUser()
+        val raceId = client.anyRaceId(user.token)
+        val cultureId = client.api(HttpMethod.Get, "/cultures", user.token).arr()
+            .first { it.jsonObject.str("name") == "Науры" }.jsonObject.long("id")
+        val probe = client.api(HttpMethod.Post, "/characters", user.token, characterBody("Проба", raceId)).obj()
+        val attrIds = probe.getValue("attributes").jsonArray.map { it.jsonObject.long("attributeId") }
+        val skillIds = probe.getValue("skills").jsonArray.map { it.jsonObject.long("skillId") }
+
+        // атрибуты 5 + 3 + 3 = 15 + 6 + 6 = 27 очков, навыки 7 по 5 = 35 очков
+        val resp = client.api(
+            HttpMethod.Post, "/characters", user.token,
+            createBody(
+                raceId, cultureId,
+                stats(attrIds.take(3), listOf(5, 3, 3)),
+                stats(skillIds.take(7), List(7) { 5 }),
+            ),
+        )
+        assertEquals(HttpStatusCode.Created, resp.status)
+        val body = resp.obj()
+        assertEquals(5, body.attributeValue(attrIds[0]))
+        assertEquals("Найти брата", body.getValue("personality").jsonObject.str("goal"))
+        assertTrue(body.getValue("languages").jsonArray.any { it.jsonObject.str("name") == "Наурский" })
+    }
+
+    @Test
+    fun `422 code`() = withApp { client ->
+        val user = client.registerUser()
+        val raceId = client.anyRaceId(user.token)
+        val probe = client.api(HttpMethod.Post, "/characters", user.token, characterBody("Проба", raceId)).obj()
+        val attrIds = probe.getValue("attributes").jsonArray.map { it.jsonObject.long("attributeId") }
+        val skillIds = probe.getValue("skills").jsonArray.map { it.jsonObject.long("skillId") }
+
+        // 28 очков атрибутов: 5 + 3 + 3 + 1
+        val attrOver = client.api(
+            HttpMethod.Post, "/characters", user.token,
+            createBody(raceId, null, stats(attrIds.take(4), listOf(5, 3, 3, 1)), "[]"),
+        )
+        assertEquals(HttpStatusCode.UnprocessableEntity, attrOver.status)
+
+        // уровень атрибута выше 5
+        val tooHigh = client.api(
+            HttpMethod.Post, "/characters", user.token,
+            createBody(raceId, null, stats(attrIds.take(1), listOf(6)), "[]"),
+        )
+        assertEquals(HttpStatusCode.UnprocessableEntity, tooHigh.status)
+
+        // 36 очков навыков
+        val skillOver = client.api(
+            HttpMethod.Post, "/characters", user.token,
+            createBody(raceId, null, "[]", stats(skillIds.take(8), listOf(5, 5, 5, 5, 5, 5, 5, 1))),
+        )
+        assertEquals(HttpStatusCode.UnprocessableEntity, skillOver.status)
+
+        // в списке только пробный персонаж
+        assertEquals(1, client.api(HttpMethod.Get, "/characters", user.token).obj().long("total"))
+    }
+
+    @Test
+    fun `блок характера можно изменить`() = withApp { client ->
+        val user = client.registerUser()
+        val raceId = client.anyRaceId(user.token)
+        val id = client.api(HttpMethod.Post, "/characters", user.token, characterBody("Галадриэль", raceId)).obj().long("id")
+
+        val resp = client.api(HttpMethod.Put, "/characters/$id/personality", user.token, """{"goal":"Защитить лес"}""")
+        assertEquals(HttpStatusCode.OK, resp.status)
+        val after = client.api(HttpMethod.Get, "/characters/$id", user.token).obj()
+        assertEquals("Защитить лес", after.getValue("personality").jsonObject.str("goal"))
+    }
+    @Test
+    fun `справочник атрибутов доступен и не пуст`() = withApp { client ->
+        val user = client.registerUser()
+        val resp = client.api(HttpMethod.Get, "/attributes", user.token)
+        assertEquals(HttpStatusCode.OK, resp.status)
+        assertTrue(resp.arr().isNotEmpty())
+    }
 }
 
 private fun kotlinx.serialization.json.JsonObject.attributeValue(attributeId: Long): Long =

@@ -183,3 +183,18 @@ class ArmourEntity(id: EntityID<Long>) : LongEntity(id) {
     var vulnerability by Armours.vulnerability
     var item by ItemEntity referencedOn Armours.item
 }
+
+// ---------- Лор ----------
+object LoreEntities : OwnedTable("lore_entity") {
+    val category = varchar("category", 50)
+    val title = varchar("title", 200)
+    val body = text("body")
+}
+
+class LoreEntity(id: EntityID<Long>) : OwnedEntity(id, LoreEntities) {
+    companion object : LongEntityClass<LoreEntity>(LoreEntities)
+
+    var category by LoreEntities.category
+    var title by LoreEntities.title
+    var body by LoreEntities.body
+}

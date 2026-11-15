@@ -1063,6 +1063,69 @@ paths:
                 items:
                   $ref: '#/components/schemas/SkillResponse'
         '401': *id002
+  /api/v1/lore:
+    get:
+      summary: Лор (поиск по названию, фильтр по категории, подгрузка частями)
+      tags:
+        - Лор
+      security: *id001
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+          description: Подстрока в названии
+        - name: category
+          in: query
+          schema:
+            type: string
+            maxLength: 50
+          description: Точная категория
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Страница статей (без текста)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LorePage'
+        '401': *id002
+        '422': *id004
+  /api/v1/lore/{id}:
+    parameters:
+      - *id008
+    get:
+      summary: Статья лора с текстом (Markdown)
+      tags:
+        - Лор
+      security: *id001
+      responses:
+        '200':
+          description: Статья
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoreResponse'
+        '401': *id002
+        '404': *id006
+  /api/v1/attributes:
+    get:
+      summary: Атрибуты (справочник)
+      tags:
+        - Атрибуты
+      security: *id001
+      responses:
+        '200':
+          description: Атрибуты
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NamedRef'
+        '401': *id002
   /api/v1/characters/{id}/items/{itemId}:
     parameters:
       - &id010
@@ -1137,6 +1200,35 @@ paths:
       responses:
         '200':
           description: Экипировка изменена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /api/v1/characters/{id}/personality:
+    parameters:
+      - *id010
+    put:
+      summary: Изменить блок характера и биографию
+      tags:
+        - Characters
+      security: *id009
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonalityDto'
+      responses:
+        '200':
+          description: Блок характера сохранён
           content:
             application/json:
               schema:
@@ -1484,15 +1576,34 @@ components:
           type: integer
           minimum: 0
           default: 0
+          description: Игнорируется. При создании текущее HP равно максимальному
         mlCur:
           type: integer
           minimum: 0
           default: 0
+          description: Игнорируется. При создании магическая нагрузка равна 0
         spellIds:
           type: array
           items:
             type: integer
             format: int64
+        classId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Класс персонажа (необязательно)
+        personality:
+          $ref: '#/components/schemas/PersonalityDto'
+        attributes:
+          type: array
+          description: Очки атрибутов при создании. Значение 0-5, цена уровня v*(v+1)/2, всего не больше 27
+          items:
+            $ref: '#/components/schemas/StatInput'
+        skills:
+          type: array
+          description: Очки навыков при создании. Значение 0-5, по очку за уровень, всего не больше 35
+          items:
+            $ref: '#/components/schemas/StatInput'
     CharacterUpdateRequest:
       type: object
       required:
@@ -1600,6 +1711,23 @@ components:
           description: Все навыки персонажа (в списке персонажей пусто)
           items:
             $ref: '#/components/schemas/SkillValue'
+        hpMax:
+          type: integer
+          description: Максимальное HP, рассчитывается сервером (10 + бонус Выносливости + уровень * 2). В списке персонажей не приходит
+        mlMax:
+          type: integer
+          description: Максимум магической нагрузки, рассчитывается сервером ((уровень + модификатор Магической Стойкости + Выносливость) * 10). В списке персонажей не приходит
+        personality:
+          $ref: '#/components/schemas/PersonalityDto'
+        languages:
+          type: array
+          description: Языки персонажа (при создании записываются языки культуры)
+          items:
+            $ref: '#/components/schemas/NamedRef'
+        classes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NamedRef'
     CharacterPage:
       type: object
       required:
@@ -2011,3 +2139,93 @@ components:
           format: int64
         value:
           type: integer
+    LoreListItem:
+      type: object
+      required:
+        - id
+        - category
+        - title
+        - isCustom
+      properties:
+        id:
+          type: integer
+          format: int64
+        category:
+          type: string
+        title:
+          type: string
+        isCustom:
+          type: boolean
+    LorePage:
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+        - hasMore
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoreListItem'
+        total:
+          type: integer
+          format: int64
+        limit:
+          type: integer
+        offset:
+          type: integer
+          format: int64
+        hasMore:
+          type: boolean
+    LoreResponse:
+      type: object
+      required:
+        - id
+        - category
+        - title
+        - body
+        - isCustom
+      properties:
+        id:
+          type: integer
+          format: int64
+        category:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+          description: Текст статьи в формате Markdown
+        isCustom:
+          type: boolean
+    PersonalityDto:
+      type: object
+      description: Блок характера и биография (до 5000 символов в каждом поле)
+      properties:
+        biography:
+          type: string
+        goal:
+          type: string
+        uniqueTraits:
+          type: string
+        personalityTraits:
+          type: string
+        personalValues:
+          type: string
+        personalEvils:
+          type: string
+    StatInput:
+      type: object
+      required:
+        - id
+        - value
+      properties:
+        id:
+          type: integer
+          format: int64
+        value:
+          type: integer
+          minimum: 0
+          maximum: 5
